@@ -3,7 +3,7 @@
  *
  *  patch_hdmi.c - routines for HDMI/DisplayPort codecs
  *
- *  Copyright(c) 2008-2010 Intel Corporation. All rights reserved.
+ *  Copyright(c) 2008-2010 Intel Corporation
  *  Copyright (c) 2006 ATI Technologies Inc.
  *  Copyright (c) 2008 NVIDIA Corp.  All rights reserved.
  *  Copyright (c) 2008 Wei Ni <wni@nvidia.com>
@@ -1511,8 +1511,8 @@ static void update_eld(struct hda_codec *codec,
 
 	if (eld->eld_valid) {
 		if (eld->eld_size <= 0 ||
-		    snd_hdmi_parse_eld(codec, &eld->info, eld->eld_buffer,
-				       eld->eld_size) < 0) {
+		    snd_parse_eld(hda_codec_dev(codec), &eld->info,
+				  eld->eld_buffer, eld->eld_size) < 0) {
 			eld->eld_valid = false;
 			if (repoll) {
 				schedule_delayed_work(&per_pin->work,
@@ -1555,7 +1555,7 @@ static void update_eld(struct hda_codec *codec,
 		pcm_jack = pin_idx_to_pcm_jack(codec, per_pin);
 
 	if (eld->eld_valid)
-		snd_hdmi_show_eld(codec, &eld->info);
+		snd_show_eld(hda_codec_dev(codec), &eld->info);
 
 	eld_changed = (pin_eld->eld_valid != eld->eld_valid);
 	eld_changed |= (pin_eld->monitor_present != eld->monitor_present);
@@ -1989,6 +1989,8 @@ static int hdmi_add_cvt(struct hda_codec *codec, hda_nid_t cvt_nid)
 }
 
 static const struct snd_pci_quirk force_connect_list[] = {
+	SND_PCI_QUIRK(0x103c, 0x83e2, "HP EliteDesk 800 G4", 1),
+	SND_PCI_QUIRK(0x103c, 0x83ef, "HP MP9 G4 Retail System AMS", 1),
 	SND_PCI_QUIRK(0x103c, 0x870f, "HP", 1),
 	SND_PCI_QUIRK(0x103c, 0x871a, "HP", 1),
 	SND_PCI_QUIRK(0x103c, 0x8711, "HP", 1),
@@ -2301,6 +2303,7 @@ static int generic_hdmi_build_pcms(struct hda_codec *codec)
 	codec_dbg(codec, "hdmi: pcm_num set to %d\n", pcm_num);
 
 	for (idx = 0; idx < pcm_num; idx++) {
+		struct hdmi_spec_per_cvt *per_cvt;
 		struct hda_pcm *info;
 		struct hda_pcm_stream *pstr;
 
@@ -2316,6 +2319,11 @@ static int generic_hdmi_build_pcms(struct hda_codec *codec)
 		pstr = &info->stream[SNDRV_PCM_STREAM_PLAYBACK];
 		pstr->substreams = 1;
 		pstr->ops = generic_ops;
+
+		per_cvt = get_cvt(spec, 0);
+		pstr->channels_min = per_cvt->channels_min;
+		pstr->channels_max = per_cvt->channels_max;
+
 		/* pcm number is less than pcm_rec array size */
 		if (spec->pcm_used >= ARRAY_SIZE(spec->pcm_rec))
 			break;
@@ -2507,7 +2515,6 @@ static void generic_hdmi_free(struct hda_codec *codec)
 	generic_spec_free(codec);
 }
 
-#ifdef CONFIG_PM
 static int generic_hdmi_suspend(struct hda_codec *codec)
 {
 	struct hdmi_spec *spec = codec->spec;
@@ -2534,7 +2541,6 @@ static int generic_hdmi_resume(struct hda_codec *codec)
 	}
 	return 0;
 }
-#endif
 
 static const struct hda_codec_ops generic_hdmi_patch_ops = {
 	.init			= generic_hdmi_init,
@@ -2542,10 +2548,8 @@ static const struct hda_codec_ops generic_hdmi_patch_ops = {
 	.build_pcms		= generic_hdmi_build_pcms,
 	.build_controls		= generic_hdmi_build_controls,
 	.unsol_event		= hdmi_unsol_event,
-#ifdef CONFIG_PM
 	.suspend		= generic_hdmi_suspend,
 	.resume			= generic_hdmi_resume,
-#endif
 };
 
 static const struct hdmi_ops generic_standard_hdmi_ops = {
@@ -2946,7 +2950,6 @@ static void i915_pin_cvt_fixup(struct hda_codec *codec,
 	}
 }
 
-#ifdef CONFIG_PM
 static int i915_adlp_hdmi_suspend(struct hda_codec *codec)
 {
 	struct hdmi_spec *spec = codec->spec;
@@ -3026,7 +3029,6 @@ static int i915_adlp_hdmi_resume(struct hda_codec *codec)
 
 	return res;
 }
-#endif
 
 /* precondition and allocation for Intel codecs */
 static int alloc_intel_hdmi(struct hda_codec *codec)
@@ -3161,10 +3163,8 @@ static int patch_i915_adlp_hdmi(struct hda_codec *codec)
 		if (spec->silent_stream_type) {
 			spec->silent_stream_type = SILENT_STREAM_KAE;
 
-#ifdef CONFIG_PM
 			codec->patch_ops.resume = i915_adlp_hdmi_resume;
 			codec->patch_ops.suspend = i915_adlp_hdmi_suspend;
-#endif
 		}
 	}
 
@@ -4636,8 +4636,10 @@ HDA_CODEC_ENTRY(0x8086281a, "Jasperlake HDMI",	patch_i915_icl_hdmi),
 HDA_CODEC_ENTRY(0x8086281b, "Elkhartlake HDMI",	patch_i915_icl_hdmi),
 HDA_CODEC_ENTRY(0x8086281c, "Alderlake-P HDMI", patch_i915_adlp_hdmi),
 HDA_CODEC_ENTRY(0x8086281d, "Meteor Lake HDMI",	patch_i915_adlp_hdmi),
+HDA_CODEC_ENTRY(0x8086281e, "Battlemage HDMI",	patch_i915_adlp_hdmi),
 HDA_CODEC_ENTRY(0x8086281f, "Raptor Lake P HDMI",	patch_i915_adlp_hdmi),
 HDA_CODEC_ENTRY(0x80862820, "Lunar Lake HDMI",	patch_i915_adlp_hdmi),
+HDA_CODEC_ENTRY(0x80862822, "Panther Lake HDMI",	patch_i915_adlp_hdmi),
 HDA_CODEC_ENTRY(0x80862880, "CedarTrail HDMI",	patch_generic_hdmi),
 HDA_CODEC_ENTRY(0x80862882, "Valleyview2 HDMI",	patch_i915_byt_hdmi),
 HDA_CODEC_ENTRY(0x80862883, "Braswell HDMI",	patch_i915_byt_hdmi),

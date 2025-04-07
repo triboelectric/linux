@@ -26,12 +26,13 @@ LIB	:= $(LIBDIR)/libaotst.a
 LDLIBS	+= $(LIB) -pthread
 LIBDEPS	:= lib/aolib.h Makefile
 
-CFLAGS	:= -Wall -O2 -g -D_GNU_SOURCE -fno-strict-aliasing
+CFLAGS	+= -Wall -O2 -g -fno-strict-aliasing
 CFLAGS	+= $(KHDR_INCLUDES)
 CFLAGS	+= -iquote ./lib/ -I ../../../../include/
 
 # Library
-LIBSRC	:= kconfig.c netlink.c proc.c repair.c setup.c sock.c utils.c
+LIBSRC	:= ftrace.c ftrace-tcp.c kconfig.c netlink.c
+LIBSRC	+= proc.c repair.c setup.c sock.c utils.c
 LIBOBJ	:= $(LIBSRC:%.c=$(LIBDIR)/%.o)
 EXTRA_CLEAN += $(LIBOBJ) $(LIB)
 
@@ -52,5 +53,5 @@ $(OUTPUT)/%_ipv6: %.c
 
 $(OUTPUT)/icmps-accept_ipv4: CFLAGS+= -DTEST_ICMPS_ACCEPT
 $(OUTPUT)/icmps-accept_ipv6: CFLAGS+= -DTEST_ICMPS_ACCEPT
-$(OUTPUT)/bench-lookups_ipv4: LDFLAGS+= -lm
-$(OUTPUT)/bench-lookups_ipv6: LDFLAGS+= -lm
+$(OUTPUT)/bench-lookups_ipv4: LDLIBS+= -lm
+$(OUTPUT)/bench-lookups_ipv6: LDLIBS+= -lm

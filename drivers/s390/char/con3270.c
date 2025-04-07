@@ -23,6 +23,7 @@
 #include <linux/memblock.h>
 #include <linux/compat.h>
 
+#include <asm/machine.h>
 #include <asm/ccwdev.h>
 #include <asm/cio.h>
 #include <asm/ebcdic.h>
@@ -54,7 +55,7 @@ struct tty3270_attribute {
 };
 
 struct tty3270_cell {
-	unsigned char character;
+	u8 character;
 	struct tty3270_attribute attributes;
 };
 
@@ -123,7 +124,7 @@ struct tty3270 {
 
 	/* Character array for put_char/flush_chars. */
 	unsigned int char_count;
-	char char_buf[TTY3270_CHAR_BUF_SIZE];
+	u8 char_buf[TTY3270_CHAR_BUF_SIZE];
 };
 
 /* tty3270->update_flags. See tty3270_update for details. */
@@ -528,7 +529,7 @@ static void tty3270_update(struct timer_list *t)
 	u8 cmd = TC_WRITE;
 	int rc, len;
 
-	wrq = xchg(&tp->write, 0);
+	wrq = xchg(&tp->write, NULL);
 	if (!wrq) {
 		tty3270_set_timer(tp, 1);
 		return;
@@ -746,7 +747,7 @@ static void tty3270_issue_read(struct tty3270 *tp, int lock)
 	struct raw3270_request *rrq;
 	int rc;
 
-	rrq = xchg(&tp->read, 0);
+	rrq = xchg(&tp->read, NULL);
 	if (!rrq)
 		/* Read already scheduled. */
 		return;
@@ -792,7 +793,7 @@ static void tty3270_deactivate(struct raw3270_view *view)
 {
 	struct tty3270 *tp = container_of(view, struct tty3270, view);
 
-	del_timer(&tp->timer);
+	timer_delete(&tp->timer);
 }
 
 static void tty3270_irq(struct tty3270 *tp, struct raw3270_request *rq, struct irb *irb)
@@ -1059,7 +1060,7 @@ static void tty3270_free(struct raw3270_view *view)
 {
 	struct tty3270 *tp = container_of(view, struct tty3270, view);
 
-	del_timer_sync(&tp->timer);
+	timer_delete_sync(&tp->timer);
 	tty3270_free_screen(tp->screen, tp->allocated_lines);
 	free_page((unsigned long)tp->converted_line);
 	kfree(tp->input);
@@ -1255,7 +1256,7 @@ static unsigned int tty3270_write_room(struct tty_struct *tty)
  * Insert character into the screen at the current position with the
  * current color and highlight. This function does NOT do cursor movement.
  */
-static void tty3270_put_character(struct tty3270 *tp, char ch)
+static void tty3270_put_character(struct tty3270 *tp, u8 ch)
 {
 	struct tty3270_line *line;
 	struct tty3270_cell *cell;
@@ -1561,7 +1562,7 @@ static void tty3270_goto_xy(struct tty3270 *tp, int cx, int cy)
  *  Pn is a numeric parameter, a string of zero or more decimal digits.
  *  Ps is a selective parameter.
  */
-static void tty3270_escape_sequence(struct tty3270 *tp, char ch)
+static void tty3270_escape_sequence(struct tty3270 *tp, u8 ch)
 {
 	enum { ES_NORMAL, ES_ESC, ES_SQUARE, ES_PAREN, ES_GETPARS };
 
@@ -1726,7 +1727,7 @@ static void tty3270_escape_sequence(struct tty3270 *tp, char ch)
  * String write routine for 3270 ttys
  */
 static void tty3270_do_write(struct tty3270 *tp, struct tty_struct *tty,
-			     const unsigned char *buf, int count)
+			     const u8 *buf, size_t count)
 {
 	int i_msg, i;
 
@@ -2052,7 +2053,7 @@ con3270_write(struct console *co, const char *str, unsigned int count)
 {
 	struct tty3270 *tp = co->data;
 	unsigned long flags;
-	char c;
+	u8 c;
 
 	spin_lock_irqsave(&tp->view.lock, flags);
 	while (count--) {
@@ -2156,7 +2157,7 @@ con3270_init(void)
 		return -ENODEV;
 
 	/* Set the console mode for VM */
-	if (MACHINE_IS_VM) {
+	if (machine_is_vm()) {
 		cpcmd("TERM CONMODE 3270", NULL, 0, NULL);
 		cpcmd("TERM AUTOCR OFF", NULL, 0, NULL);
 	}
@@ -2185,6 +2186,7 @@ con3270_init(void)
 console_initcall(con3270_init);
 #endif
 
+MODULE_DESCRIPTION("IBM/3270 Driver - tty functions");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_CHARDEV_MAJOR(IBM_TTY3270_MAJOR);
 

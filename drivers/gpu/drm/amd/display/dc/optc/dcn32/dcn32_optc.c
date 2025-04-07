@@ -43,12 +43,11 @@
 	optc1->tg_shift->field_name, optc1->tg_mask->field_name
 
 static void optc32_set_odm_combine(struct timing_generator *optc, int *opp_id, int opp_cnt,
-		struct dc_crtc_timing *timing)
+		int segment_width, int last_segment_width)
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 	uint32_t memory_mask = 0;
-	int h_active = timing->h_addressable + timing->h_border_left + timing->h_border_right;
-	int mpcc_hactive = h_active / opp_cnt;
+	int h_active = segment_width * opp_cnt;
 	/* Each memory instance is 2048x(32x2) bits to support half line of 4096 */
 	int odm_mem_count = (h_active + 2047) / 2048;
 
@@ -91,7 +90,7 @@ static void optc32_set_odm_combine(struct timing_generator *optc, int *opp_id, i
 	}
 
 	REG_UPDATE(OPTC_WIDTH_CONTROL,
-			OPTC_SEGMENT_WIDTH, mpcc_hactive);
+			OPTC_SEGMENT_WIDTH, segment_width);
 
 	REG_UPDATE(OTG_H_TIMING_CNTL,
 			OTG_H_TIMING_DIV_MODE, opp_cnt - 1);
@@ -120,6 +119,13 @@ void optc32_get_odm_combine_segments(struct timing_generator *tg, int *odm_combi
 	default:
 		*odm_combine_segments = -1;
 	}
+}
+
+void optc32_wait_odm_doublebuffer_pending_clear(struct timing_generator *tg)
+{
+	struct optc *optc1 = DCN10TG_FROM_TG(tg);
+
+	REG_WAIT(OTG_DOUBLE_BUFFER_CONTROL, OTG_H_TIMING_DIV_MODE_DB_UPDATE_PENDING, 0, 2, 50000);
 }
 
 void optc32_set_h_timing_div_manual_mode(struct timing_generator *optc, bool manual_mode)
@@ -166,18 +172,21 @@ static bool optc32_disable_crtc(struct timing_generator *optc)
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 
-	/* disable otg request until end of the first line
-	 * in the vertical blank region
-	 */
-	REG_UPDATE(OTG_CONTROL,
-			OTG_MASTER_EN, 0);
-
 	REG_UPDATE_5(OPTC_DATA_SOURCE_SELECT,
 			OPTC_SEG0_SRC_SEL, 0xf,
 			OPTC_SEG1_SRC_SEL, 0xf,
 			OPTC_SEG2_SRC_SEL, 0xf,
 			OPTC_SEG3_SRC_SEL, 0xf,
 			OPTC_NUM_OF_INPUT_SEGMENT, 0);
+
+	REG_UPDATE(OPTC_MEMORY_CONFIG,
+			OPTC_MEM_SEL, 0);
+
+	/* disable otg request until end of the first line
+	 * in the vertical blank region
+	 */
+	REG_UPDATE(OTG_CONTROL,
+			OTG_MASTER_EN, 0);
 
 	REG_UPDATE(CONTROL,
 			VTG0_ENABLE, 0);
@@ -205,6 +214,13 @@ static void optc32_disable_phantom_otg(struct timing_generator *optc)
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 
+	REG_UPDATE_5(OPTC_DATA_SOURCE_SELECT,
+			OPTC_SEG0_SRC_SEL, 0xf,
+			OPTC_SEG1_SRC_SEL, 0xf,
+			OPTC_SEG2_SRC_SEL, 0xf,
+			OPTC_SEG3_SRC_SEL, 0xf,
+			OPTC_NUM_OF_INPUT_SEGMENT, 0);
+
 	REG_UPDATE(OTG_CONTROL, OTG_MASTER_EN, 0);
 }
 
@@ -222,7 +238,7 @@ void optc32_set_odm_bypass(struct timing_generator *optc,
 			OPTC_SEG3_SRC_SEL, 0xf
 			);
 
-	h_div = optc1_is_two_pixels_per_containter(dc_crtc_timing);
+	h_div = optc->funcs->is_two_pixels_per_container(dc_crtc_timing);
 	REG_UPDATE(OTG_H_TIMING_CNTL,
 			OTG_H_TIMING_DIV_MODE, h_div);
 
@@ -250,9 +266,6 @@ static void optc32_setup_manual_trigger(struct timing_generator *optc)
 				OTG_V_TOTAL_MAX_SEL, 1,
 				OTG_FORCE_LOCK_ON_EVENT, 0,
 				OTG_SET_V_TOTAL_MIN_MASK, (1 << 1)); /* TRIGA */
-
-		// Setup manual flow control for EOF via TRIG_A
-		optc->funcs->setup_manual_trigger(optc);
 	}
 }
 
@@ -335,6 +348,7 @@ static struct timing_generator_funcs dcn32_tg_funcs = {
 		.set_odm_bypass = optc32_set_odm_bypass,
 		.set_odm_combine = optc32_set_odm_combine,
 		.get_odm_combine_segments = optc32_get_odm_combine_segments,
+		.wait_odm_doublebuffer_pending_clear = optc32_wait_odm_doublebuffer_pending_clear,
 		.set_h_timing_div_manual_mode = optc32_set_h_timing_div_manual_mode,
 		.get_optc_source = optc2_get_optc_source,
 		.set_out_mux = optc3_set_out_mux,
@@ -346,6 +360,11 @@ static struct timing_generator_funcs dcn32_tg_funcs = {
 		.program_manual_trigger = optc2_program_manual_trigger,
 		.setup_manual_trigger = optc2_setup_manual_trigger,
 		.get_hw_timing = optc1_get_hw_timing,
+		.is_two_pixels_per_container = optc1_is_two_pixels_per_container,
+		.get_optc_double_buffer_pending = optc3_get_optc_double_buffer_pending,
+		.get_otg_double_buffer_pending = optc3_get_otg_update_pending,
+		.get_pipe_update_pending = optc3_get_pipe_update_pending,
+		.read_otg_state = optc31_read_otg_state,
 };
 
 void dcn32_timing_generator_init(struct optc *optc1)

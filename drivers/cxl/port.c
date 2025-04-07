@@ -69,6 +69,8 @@ static int cxl_switch_port_probe(struct cxl_port *port)
 	if (rc < 0)
 		return rc;
 
+	cxl_switch_parse_cdat(port);
+
 	cxlhdm = devm_cxl_setup_hdm(port, NULL);
 	if (!IS_ERR(cxlhdm))
 		return devm_cxl_enumerate_decoders(cxlhdm, NULL);
@@ -96,7 +98,7 @@ static int cxl_endpoint_port_probe(struct cxl_port *port)
 	struct cxl_port *root;
 	int rc;
 
-	rc = cxl_dvsec_rr_decode(cxlds->dev, cxlds->cxl_dvsec, &info);
+	rc = cxl_dvsec_rr_decode(cxlds, &info);
 	if (rc < 0)
 		return rc;
 
@@ -109,6 +111,7 @@ static int cxl_endpoint_port_probe(struct cxl_port *port)
 
 	/* Cache the data early to ensure is_visible() works */
 	read_cdat_data(port);
+	cxl_endpoint_parse_cdat(port);
 
 	get_device(&cxlmd->dev);
 	rc = devm_add_action_or_reset(&port->dev, schedule_detach, cxlmd);
@@ -127,14 +130,15 @@ static int cxl_endpoint_port_probe(struct cxl_port *port)
 	 * This can't fail in practice as CXL root exit unregisters all
 	 * descendant ports and that in turn synchronizes with cxl_port_probe()
 	 */
-	root = find_cxl_root(port);
+	struct cxl_root *cxl_root __free(put_cxl_root) = find_cxl_root(port);
+
+	root = &cxl_root->port;
 
 	/*
 	 * Now that all endpoint decoders are successfully enumerated, try to
 	 * assemble regions from committed decoders
 	 */
 	device_for_each_child(&port->dev, root, discover_region);
-	put_device(&root->dev);
 
 	return 0;
 }
@@ -149,7 +153,7 @@ static int cxl_port_probe(struct device *dev)
 }
 
 static ssize_t CDAT_read(struct file *filp, struct kobject *kobj,
-			 struct bin_attribute *bin_attr, char *buf,
+			 const struct bin_attribute *bin_attr, char *buf,
 			 loff_t offset, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -166,10 +170,10 @@ static ssize_t CDAT_read(struct file *filp, struct kobject *kobj,
 				       port->cdat.length);
 }
 
-static BIN_ATTR_ADMIN_RO(CDAT, 0);
+static const BIN_ATTR_ADMIN_RO(CDAT, 0);
 
 static umode_t cxl_port_bin_attr_is_visible(struct kobject *kobj,
-					    struct bin_attribute *attr, int i)
+					    const struct bin_attribute *attr, int i)
 {
 	struct device *dev = kobj_to_dev(kobj);
 	struct cxl_port *port = to_cxl_port(dev);
@@ -180,13 +184,13 @@ static umode_t cxl_port_bin_attr_is_visible(struct kobject *kobj,
 	return 0;
 }
 
-static struct bin_attribute *cxl_cdat_bin_attributes[] = {
+static const struct bin_attribute *const cxl_cdat_bin_attributes[] = {
 	&bin_attr_CDAT,
 	NULL,
 };
 
-static struct attribute_group cxl_cdat_attribute_group = {
-	.bin_attrs = cxl_cdat_bin_attributes,
+static const struct attribute_group cxl_cdat_attribute_group = {
+	.bin_attrs_new = cxl_cdat_bin_attributes,
 	.is_bin_visible = cxl_port_bin_attr_is_visible,
 };
 
@@ -204,7 +208,23 @@ static struct cxl_driver cxl_port_driver = {
 	},
 };
 
-module_cxl_driver(cxl_port_driver);
+static int __init cxl_port_init(void)
+{
+	return cxl_driver_register(&cxl_port_driver);
+}
+/*
+ * Be ready to immediately enable ports emitted by the platform CXL root
+ * (e.g. cxl_acpi) when CONFIG_CXL_PORT=y.
+ */
+subsys_initcall(cxl_port_init);
+
+static void __exit cxl_port_exit(void)
+{
+	cxl_driver_unregister(&cxl_port_driver);
+}
+module_exit(cxl_port_exit);
+
+MODULE_DESCRIPTION("CXL: Port enumeration and services");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(CXL);
+MODULE_IMPORT_NS("CXL");
 MODULE_ALIAS_CXL(CXL_DEVICE_PORT);

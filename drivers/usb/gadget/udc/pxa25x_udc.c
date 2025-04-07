@@ -38,7 +38,7 @@
 #include <asm/byteorder.h>
 #include <asm/dma.h>
 #include <asm/mach-types.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -1503,7 +1503,7 @@ reset_gadget(struct pxa25x_udc *dev, struct usb_gadget_driver *driver)
 		ep->stopped = 1;
 		nuke(ep, -ESHUTDOWN);
 	}
-	del_timer_sync(&dev->timer);
+	timer_delete_sync(&dev->timer);
 
 	/* report reset; the driver is already quiesced */
 	if (driver)
@@ -1530,7 +1530,7 @@ stop_activity(struct pxa25x_udc *dev, struct usb_gadget_driver *driver)
 		ep->stopped = 1;
 		nuke(ep, -ESHUTDOWN);
 	}
-	del_timer_sync(&dev->timer);
+	timer_delete_sync(&dev->timer);
 
 	/* report disconnect; the driver is already quiesced */
 	if (driver)
@@ -1607,14 +1607,14 @@ static void handle_ep0 (struct pxa25x_udc *dev)
 	if (udccs0 & UDCCS0_SST) {
 		nuke(ep, -EPIPE);
 		udc_ep0_set_UDCCS(dev, UDCCS0_SST);
-		del_timer(&dev->timer);
+		timer_delete(&dev->timer);
 		ep0_idle(dev);
 	}
 
 	/* previous request unfinished?  non-error iff back-to-back ... */
 	if ((udccs0 & UDCCS0_SA) != 0 && dev->ep0state != EP0_IDLE) {
 		nuke(ep, 0);
-		del_timer(&dev->timer);
+		timer_delete(&dev->timer);
 		ep0_idle(dev);
 	}
 
@@ -2397,12 +2397,15 @@ static void pxa25x_udc_shutdown(struct platform_device *_dev)
 	pullup_off();
 }
 
-static int pxa25x_udc_remove(struct platform_device *pdev)
+static void pxa25x_udc_remove(struct platform_device *pdev)
 {
 	struct pxa25x_udc *dev = platform_get_drvdata(pdev);
 
-	if (dev->driver)
-		return -EBUSY;
+	if (dev->driver) {
+		dev_err(&pdev->dev,
+			"Driver still in use but removing anyhow\n");
+		return;
+	}
 
 	usb_del_gadget_udc(&dev->gadget);
 	dev->pullup = 0;
@@ -2414,7 +2417,6 @@ static int pxa25x_udc_remove(struct platform_device *pdev)
 		dev->transceiver = NULL;
 
 	the_controller = NULL;
-	return 0;
 }
 
 /*-------------------------------------------------------------------------*/
