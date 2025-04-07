@@ -34,3 +34,4 @@ jobs:
         with:
           check: false
           level: sei_cert
+          timings: true
